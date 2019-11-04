@@ -1468,6 +1468,40 @@ suite.addBatch({
         foo.filterAll();
         assert.equal(all.value(), 6);
       },
+      "tag dimension with zero keys": {
+        "three empties": function(data) {
+          var rows = [{id: 1, links: []}, {id: 2, links: []}, {id: 3, links: []}];
+          var ndx = crossfilter(rows);
+          var dimLinks = ndx.dimension(r => r.links, true);
+          dimLinks.filter("vv");
+          assert.equal(dimLinks.top(Infinity).length, 0);
+        }
+      },
+      "tag dimension with one key": {
+        "one key once": function(data) {
+          var rows = [{id: 1, links: ["vv"]}, {id: 2, links: []}];
+          var ndx = crossfilter(rows);
+          var dimLinks = ndx.dimension(r => r.links, true);
+          dimLinks.filter("vv");
+          assert.equal(dimLinks.top(Infinity).length, 1);
+        },
+        "one key doubled": function(data) {
+          var rows = [{id: 1, links: ["vv","vv"]}, {id: 2, links: []}];
+          var ndx = crossfilter(rows);
+          var dimLinks = ndx.dimension(r => r.links, true);
+          dimLinks.filter("vv");
+          // doubled key in tag dimension means it shows up in dim.top() twice
+          assert.equal(dimLinks.top(Infinity).length, 2);
+          assert.equal(ndx.allFiltered().length, 1);
+        },
+        "one key twice": function(data) {
+          var rows = [{id: 1, links: []}, {id: 2, links: ["vv"]}, {id: 3, links: ["vv"]}];
+          var ndx = crossfilter(rows);
+          var dimLinks = ndx.dimension(r => r.links, true);
+          dimLinks.filter("vv");
+          assert.equal(dimLinks.top(Infinity).length, 2);
+        }
+      },
       "can add new groups that are before existing groups": function(data) {
         var data = crossfilter(),
             foo = data.dimension(function(d) { return +d; }),
@@ -1506,6 +1540,282 @@ suite.addBatch({
           }));
         }
         assert.deepEqual(foos.top(1), [{key: -998, value: 8977.5}]);
+      },
+      "can add a record that matches the tag filter": function(data) {
+        var data2 = crossfilter();
+        var fooDimension = data2.dimension(function(d) { return d.foo; }, true);
+        data2.add([
+          {foo: [1, 2, 3], bar: 1},
+          {foo: [1, 2   ], bar: 2},
+          {foo: [   2, 3], bar: 4}
+        ]);
+        var another =
+          {foo: [1,    3], bar: 8};
+
+        var fooGroup = fooDimension.group();
+        var allBarSum = data2.groupAll().reduceSum(function (d) { return d.bar; });
+        var fooBarSum = fooDimension.group().reduceSum(function (d) { return d.bar; });
+        var barDim = data2.dimension(function(d) { return d.bar; });
+        var barGroup = barDim.group();
+
+        assert.equal(allBarSum.value(), 7);
+        assert.deepEqual(fooGroup.all(), [
+          { key: 1, value: 2 },
+          { key: 2, value: 3 },
+          { key: 3, value: 2 }
+        ]);
+        assert.deepEqual(fooBarSum.all(), [
+          { key: 1, value: 3 },
+          { key: 2, value: 7 },
+          { key: 3, value: 5 }
+        ]);
+
+        fooDimension.filter(3);
+        assert.equal(allBarSum.value(), 5);
+
+        // add a row that matches tag filter
+        data2.add([another]);
+
+        assert.equal(data2.size(), 4);
+        assert.equal(allBarSum.value(), 13); // fails: 5
+        assert.equal(data2.allFiltered().length, 3); // fails: 2
+
+        // fooGroup and fooBarSum do not observe tag filter
+        assert.deepEqual(fooGroup.all(), [
+          { key: 1, value: 3 },
+          { key: 2, value: 3 },
+          { key: 3, value: 3 }
+        ]);
+        assert.deepEqual(fooBarSum.all(), [
+          { key: 1, value: 11 },
+          { key: 2, value: 7 },
+          { key: 3, value: 13 }
+        ]);
+
+        // barGroup does observe tag filter
+        assert.deepEqual(barGroup.all() [
+          { key: 1, value: 1 },
+          { key: 2, value: 0 },
+          { key: 4, value: 1 },
+          { key: 8, value: 1 }
+        ]);
+
+        fooDimension.filterAll();
+
+        assert.equal(allBarSum.value(), 15); // fails: 7
+        assert.equal(data2.allFiltered().length, 4); // fails: 3
+
+        data2.remove(function () {
+          return true;
+        });
+        assert.deepEqual(fooDimension.top(Infinity), []);
+      },
+      "can add a record that matches the tag filter function": function(data) {
+        var data2 = crossfilter();
+        var fooDimension = data2.dimension(function(d) { return d.foo; }, true);
+        data2.add([
+          {foo: [1, 2, 3], bar: 1},
+          {foo: [1, 2   ], bar: 2},
+          {foo: [   2, 3], bar: 4}
+        ]);
+        var another =
+          {foo: [1,    3], bar: 8};
+
+        var fooGroup = fooDimension.group();
+        var allBarSum = data2.groupAll().reduceSum(function (d) { return d.bar; });
+        var fooBarSum = fooDimension.group().reduceSum(function (d) { return d.bar; });
+        var barDim = data2.dimension(function(d) { return d.bar; });
+        var barGroup = barDim.group();
+
+        assert.equal(allBarSum.value(), 7);
+        assert.deepEqual(fooGroup.all(), [
+          { key: 1, value: 2 },
+          { key: 2, value: 3 },
+          { key: 3, value: 2 }
+        ]);
+        assert.deepEqual(fooBarSum.all(), [
+          { key: 1, value: 3 },
+          { key: 2, value: 7 },
+          { key: 3, value: 5 }
+        ]);
+
+        fooDimension.filterFunction(k => k === 3);
+        assert.equal(allBarSum.value(), 5);
+
+        // add a row that matches tag filter
+        data2.add([another]);
+
+        assert.equal(data2.size(), 4);
+        assert.equal(allBarSum.value(), 13); // fails: 5
+        assert.equal(data2.allFiltered().length, 3); // fails: 2
+
+        // fooGroup and fooBarSum do not observe tag filter
+        assert.deepEqual(fooGroup.all(), [
+          { key: 1, value: 3 },
+          { key: 2, value: 3 },
+          { key: 3, value: 3 }
+        ]);
+        assert.deepEqual(fooBarSum.all(), [
+          { key: 1, value: 11 },
+          { key: 2, value: 7 },
+          { key: 3, value: 13 }
+        ]);
+
+        // barGroup does observe tag filter
+        assert.deepEqual(barGroup.all() [
+          { key: 1, value: 1 },
+          { key: 2, value: 0 },
+          { key: 4, value: 1 },
+          { key: 8, value: 1 }
+        ]);
+
+        fooDimension.filterAll();
+
+        assert.equal(allBarSum.value(), 15); // fails: 7
+        assert.equal(data2.allFiltered().length, 4); // fails: 3
+
+        data2.remove(function () {
+          return true;
+        });
+        assert.deepEqual(fooDimension.top(Infinity), []);
+      },
+      "can add a record that doesn't match the tag filter": function(data) {
+        var data2 = crossfilter();
+        var fooDimension = data2.dimension(function(d) { return d.foo; }, true);
+        data2.add([
+          {foo: [1, 2, 3], bar: 1},
+          {foo: [1, 2   ], bar: 2},
+          {foo: [   2, 3], bar: 4}
+        ]);
+        var yetanother =
+          {foo: [   2   ], bar: 8};
+
+        var fooGroup = fooDimension.group();
+        var allBarSum = data2.groupAll().reduceSum(function (d) { return d.bar });
+        var fooBarSum = fooDimension.group().reduceSum(function (d) { return d.bar });
+        var barDim = data2.dimension(function(d) { return d.bar; });
+        var barGroup = barDim.group();
+
+        assert.equal(allBarSum.value(), 7);
+        assert.deepEqual(fooGroup.all(), [
+          { key: 1, value: 2 },
+          { key: 2, value: 3 },
+          { key: 3, value: 2 }
+        ]);
+        assert.deepEqual(fooBarSum.all(), [
+          { key: 1, value: 3 },
+          { key: 2, value: 7 },
+          { key: 3, value: 5 }
+        ]);
+
+        fooDimension.filter(3);
+        assert.equal(allBarSum.value(), 5);
+
+        // add a row that doesn't match tag filter
+        data2.add([yetanother]);
+
+        assert.equal(data2.size(), 4);
+        assert.equal(allBarSum.value(), 5);
+        assert.equal(data2.allFiltered().length, 2);
+
+        // fooGroup and fooBarSum do not observe tag filter
+        assert.deepEqual(fooGroup.all(), [
+          { key: 1, value: 2 },
+          { key: 2, value: 4 },
+          { key: 3, value: 2 }
+        ]);
+        assert.deepEqual(fooBarSum.all(), [
+          { key: 1, value: 3 },
+          { key: 2, value: 15 },
+          { key: 3, value: 5 }
+        ]);
+
+        // barGroup does observe tag filter
+        assert.deepEqual(barGroup.all() [
+          { key: 1, value: 1 },
+          { key: 2, value: 0 },
+          { key: 4, value: 1 },
+          { key: 8, value: 0 }
+        ]);
+
+        fooDimension.filterAll();
+
+        assert.equal(allBarSum.value(), 15); // fails: 7
+        assert.equal(data2.allFiltered().length, 4); // fails: 3
+
+        data2.remove(function () {
+          return true;
+        });
+        assert.deepEqual(fooDimension.top(Infinity), []);
+      },
+      "can add a record that doesn't match the tag filter function": function(data) {
+        var data2 = crossfilter();
+        var fooDimension = data2.dimension(function(d) { return d.foo; }, true);
+        data2.add([
+          {foo: [1, 2, 3], bar: 1},
+          {foo: [1, 2   ], bar: 2},
+          {foo: [   2, 3], bar: 4}
+        ]);
+        var yetanother =
+          {foo: [   2   ], bar: 8};
+
+        var fooGroup = fooDimension.group();
+        var allBarSum = data2.groupAll().reduceSum(function (d) { return d.bar });
+        var fooBarSum = fooDimension.group().reduceSum(function (d) { return d.bar });
+        var barDim = data2.dimension(function(d) { return d.bar; });
+        var barGroup = barDim.group();
+
+        assert.equal(allBarSum.value(), 7);
+        assert.deepEqual(fooGroup.all(), [
+          { key: 1, value: 2 },
+          { key: 2, value: 3 },
+          { key: 3, value: 2 }
+        ]);
+        assert.deepEqual(fooBarSum.all(), [
+          { key: 1, value: 3 },
+          { key: 2, value: 7 },
+          { key: 3, value: 5 }
+        ]);
+
+        fooDimension.filterFunction(k => k === 3);
+        assert.equal(allBarSum.value(), 5);
+
+        // add a row that doesn't match tag filter
+        data2.add([yetanother]);
+
+        assert.equal(data2.size(), 4);
+        assert.equal(allBarSum.value(), 5);
+        assert.equal(data2.allFiltered().length, 2);
+
+        // fooGroup and fooBarSum do not observe tag filter
+        assert.deepEqual(fooGroup.all(), [
+          { key: 1, value: 2 },
+          { key: 2, value: 4 },
+          { key: 3, value: 2 }
+        ]);
+        assert.deepEqual(fooBarSum.all(), [
+          { key: 1, value: 3 },
+          { key: 2, value: 15 },
+          { key: 3, value: 5 }
+        ]);
+
+        // barGroup does observe tag filter
+        assert.deepEqual(barGroup.all() [
+          { key: 1, value: 1 },
+          { key: 2, value: 0 },
+          { key: 4, value: 1 },
+          { key: 8, value: 0 }
+        ]);
+
+        fooDimension.filterAll();
+
+        assert.equal(allBarSum.value(), 15); // fails: 7
+        assert.equal(data2.allFiltered().length, 4); // fails: 3
+
+        data2.remove(function () {
+          return true;
+        });
+        assert.deepEqual(fooDimension.top(Infinity), []);
       }
     },
     "remove": {
@@ -1659,7 +1969,7 @@ suite.addBatch({
         });
         assert.deepEqual(data.foo.top(Infinity), []);
       },
-      "can remove records while filtering on iterable dimension": function(data) {
+      "can remove records using predicate function while filtering on iterable dimension": function(data) {
         var data2 = crossfilter();
         var fooDimension = data2.dimension(function(d) { return d.foo; }, true);
         data2.add([
